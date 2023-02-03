@@ -1,6 +1,6 @@
 from .models import Base, PathModel, VersionModel
 
-from sqlalchemy import create_engine, select, Select
+from sqlalchemy import create_engine, select, Select, func
 from sqlalchemy.orm import sessionmaker, Session
 
 from pathlib import Path
@@ -130,14 +130,19 @@ class Database:
         stmt = select(PathModel, VersionModel).join(VersionModel, PathModel.id == VersionModel.path_id)
         return self._select_gen(stmt)
     
-    def select_paths(self, parent: str | Path | None = None) -> Generator[PathModel, None, None]:
+    def select_paths(self, parent: str | Path | None = None, name: str | None = None) -> Generator[PathModel, None, None]:
         """A generator that yields Paths."""
         stmt = select(PathModel)
         if parent:
             stmt = stmt.where(PathModel.parent == str(parent))
+        
+        if name:
+            stmt = stmt.where(PathModel.name == name)
+
         return self.scalars(stmt)
     
-    def select_versions(self, path_id: int | None = None, version_no: int | None = None):
+    def select_versions(self, path_id: int | None = None, version_no: int | None = None) -> Generator[VersionModel, None, None]:
+        """A generator that yields Versions."""
         stmt = select(VersionModel)
         if path_id:
             stmt = stmt.where(VersionModel.path_id == path_id)
@@ -146,3 +151,35 @@ class Database:
             stmt = stmt.where(VersionModel.version_no == version_no)
 
         return self.scalars(stmt)
+
+    def upsert_version(self, path: Path, attrs: dict[str, Any]):
+        """Updates a `Path` with a new version.
+
+        Parameters
+        ----------
+        path: :class:`Path`
+            The Path to update.
+
+        attrs: :class:`Json`
+            A JSON Serializable object.
+        
+        Returns
+        -------
+        :class:`Tuple[PathModel, VersionModel]`
+            A tuple containing the Path and Version that were added to the database.
+        """
+        with self.acquire() as session:
+            stmt = select(PathModel).where(PathModel.parent == str(path.parent) and PathModel.name == path.name)
+            result = session.scalars(stmt).first()
+            if not result:
+                result = self.get_path(path.parent, path.name)
+                session.add(result)
+                session.commit()
+                version = self.get_version(result.id, 1, attrs)
+            else:
+                latest = session.query(func.max(VersionModel.version_no)).filter_by(path_id=result.id).scalar()
+                version = self.get_version(result.id, latest+1, attrs)
+        
+            session.add(version)
+            session.commit()
+            return result, version
