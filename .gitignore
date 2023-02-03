@@ -161,3 +161,4 @@ cython_debug/
 
 # Custom
 test.py
+test_dir/*
