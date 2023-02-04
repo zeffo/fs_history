@@ -1,6 +1,6 @@
 from .models import Base, PathModel, VersionModel
 
-from sqlalchemy import create_engine, select, Select, func
+from sqlalchemy import create_engine, select, Select, func, and_
 from sqlalchemy.orm import sessionmaker, Session
 
 from pathlib import Path
@@ -139,6 +139,8 @@ class Database:
         if name:
             stmt = stmt.where(PathModel.name == name)
 
+        stmt = stmt.order_by(PathModel.id)
+
         return self.scalars(stmt)
     
     def select_versions(self, path_id: int | None = None, version_no: int | None = None) -> Generator[VersionModel, None, None]:
@@ -149,6 +151,8 @@ class Database:
         
         if version_no:
             stmt = stmt.where(VersionModel.version_no == version_no)
+
+        stmt = stmt.order_by(VersionModel.version_no)
 
         return self.scalars(stmt)
 
@@ -169,7 +173,7 @@ class Database:
             A tuple containing the Path and Version that were added to the database.
         """
         with self.acquire() as session:
-            stmt = select(PathModel).where(PathModel.parent == str(path.parent) and PathModel.name == path.name)
+            stmt = select(PathModel).where(and_(PathModel.parent == str(path.parent), PathModel.name == path.name))
             result = session.scalars(stmt).first()
             if not result:
                 result = self.get_path(path.parent, path.name)
